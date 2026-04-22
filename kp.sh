@@ -1,50 +1,50 @@
 #!/bin/bash
-source ./security_check.sh # Подключаем защиту
 
-DB_FILE="./vko_base.db"
-MAIN_LOG="./system_work.log"
-BUS="/tmp/vko_bus" # Файл-шина для сообщений
+LOG_FILE="/tmp/vko_messages.log"
+DB_FILE="vko_base.txt" # Наша текстовая "База Данных"
 
-# Инициализация БД
-sqlite3 "$DB_FILE" "CREATE TABLE IF NOT EXISTS stats (element TEXT, event TEXT, target_id TEXT, coords TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);"
+if [ ! -f "$LOG_FILE" ]; then
+    echo "Ошибка: Лог-файл $LOG_FILE не найден. Сначала запустите систему ВКО."
+    exit 1
+fi
 
-echo "--- КП ВКО ЗАПУЩЕН ---" | tee -a "$MAIN_LOG"
+# По условиям ТЗ БД ведет КП. Поэтому мы копируем текущий лог в наш файл БД.
+cp "$LOG_FILE" "$DB_FILE"
 
-while true; do
-    # 1. Прием сообщений из шины
-    if [ -s "$BUS" ]; then
-        while read -r line; do
-            # Парсим сообщение: ТАЙМШТАМП | КТО | ЧТО | ID | COORDS
-            time_msg=$(echo "$line" | cut -d'|' -f1)
-            sender=$(echo "$line" | cut -d'|' -f2)
-            event=$(echo "$line" | cut -d'|' -f3)
-            tid=$(echo "$line" | cut -d'|' -f4)
-            coords=$(echo "$line" | cut -d'|' -f5)
+echo "=== КОМАНДНЫЙ ПУНКТ (КП) - АНАЛИЗ БАЗЫ ДАННЫХ ==="
+echo "Текстовая БД обновлена: $DB_FILE"
+echo "--------------------------------------------------------"
+echo "СТАТИСТИКА БОЕВЫХ ДЕЙСТВИЙ:"
+echo "--------------------------------------------------------"
 
-            # Запись в главный журнал
-            echo "$time_msg $sender $event $tid $coords" >> "$MAIN_LOG"
-            # Запись в БД
-            sqlite3 "$DB_FILE" "INSERT INTO stats (element, event, target_id, coords) VALUES ('$sender', '$event', '$tid', '$coords');"
-        done < "$BUS"
-        > "$BUS" # Очистка шины
-    fi
+# 1. Расход боекомплекта
+# Ищем строки с пусками, вытягиваем названия систем, считаем их количество и сортируем по убыванию
+echo "[1] Расход боекомплекта (Количество пусков по системам):"
+echo "СИСТЕМА     ПУСКОВ"
+echo "------------------"
+grep "Произведен пуск" "$DB_FILE" | grep -oE "ZRDN_[1-3]|SPRO" | sort | uniq -c | sort -nr | awk '{printf "%-10s %s\n", $2, $1}'
+echo ""
 
-    # 2. Проверка работоспособности (Health Check) каждые 10 секунд
-    if (( $(date +%s) % 10 == 0 )); then
-        for element in "RLS1" "RLS2" "RLS3" "ZRDN1" "SPRO"; do
-            PID_F="/tmp/${element}.sh.pid" # Проверяем PID файлы
-            if [ -f "$PID_F" ] && kill -0 $(cat "$PID_F") 2>/dev/null; then
-                echo "$(date +%T) $element работоспособность подтверждена" >> "$MAIN_LOG"
-            else
-                echo "$(date +%T) $element ОТКАЗ СИСТЕМЫ" >> "$MAIN_LOG"
-            fi
-        done
-    fi
+# 2. Активность радаров
+# Ищем все обнаружения, вытягиваем имена систем и считаем
+echo "[2] Активность систем (Количество обнаруженных целей):"
+echo "СИСТЕМА     ОБНАРУЖЕНО"
+echo "----------------------"
+grep -E "Обнаружена цель|Обнаружена БР|Обнаружен Самолет|Обнаружен КР" "$DB_FILE" | grep -oE "RLS_[1-3]|ZRDN_[1-3]|SPRO" | sort | uniq -c | sort -nr | awk '{printf "%-10s %s\n", $2, $1}'
+echo ""
 
-    # 3. Ограничение размера лога (храним последние 1000 строк)
-    if [ $(wc -l < "$MAIN_LOG") -gt 2000 ]; then
-        sed -i '1,500d' "$MAIN_LOG"
-    fi
+# 3. Ситуация с боекомплектом
+# Ищем сообщения о пустом БК и красиво выводим время и систему
+echo "[3] Ситуация с боекомплектом (Кто исчерпал боезапас):"
+echo "СИСТЕМА"
+echo "--------------------"
+grep "БОЕКОМПЛЕКТ ИСЧЕРПАН" "$DB_FILE" | grep -oE "ZRDN_[1-3]|SPRO" | uniq
+echo ""
 
-    sleep 1
-done
+# 4. Общая статистика системы ПРО
+echo "[4] Общая статистика системы СПРО (Омск):"
+SPRO_FIRE=$(grep "Произведен пуск" "$DB_FILE" | grep "SPRO" | wc -l)
+SPRO_DETECT=$(grep "Обнаружена БР" "$DB_FILE" | grep "SPRO" | wc -l)
+echo "Обнаружено баллистических ракет: $SPRO_DETECT"
+echo "Выпущено противоракет: $SPRO_FIRE"
+echo "--------------------------------------------------------"

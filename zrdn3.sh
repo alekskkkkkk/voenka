@@ -10,17 +10,22 @@ else
     exit 1
 fi
 
-SPRO_NAME=$SPRO_NAME
-SPRO_X=$SPRO_X
-SPRO_Y=$SPRO_Y
-SPRO_R=$SPRO_R
-CURRENT_AMMO=$SPRO_AMMO
-PID_FILE="$SOURCE_DIR/spro.pid"
+# ==========================================
+# ПАРАМЕТРЫ ЗРДН (Менять для zrdn2 и zrdn3)
+# ==========================================
+ZRDN_NAME=$ZRDN3_NAME
+ZRDN_X=$ZRDN3_X
+ZRDN_Y=$ZRDN3_Y
+ZRDN_R=$ZRDN3_R
+CURRENT_AMMO=$ZRDN3_AMMO
+PID_FILE="$SOURCE_DIR/zrdn_3.pid"
+# ==========================================
 
 MESSAGES_LOG="/tmp/vko_messages.log"
 TARGETS_DIR="/tmp/GenTargets/Targets"
 DESTROY_DIR="/tmp/GenTargets/Destroy"
 
+# ЗРДН создает папку уничтожения, если её нет
 mkdir -p "$DESTROY_DIR"
 
 if [ -f "$PID_FILE" ]; then
@@ -37,18 +42,19 @@ decrypt_id() {
     echo -n "$hex_id" | xxd -r -p 2>/dev/null
 }
 
+# Для ЗРДН зона - это просто круг (Пифагор)
 check_visibility() {
     local tx=$1 ty=$2
-    local dx=$((tx - SPRO_X))
-    local dy=$((ty - SPRO_Y))
+    local dx=$((tx - ZRDN_X))
+    local dy=$((ty - ZRDN_Y))
     local dist=$(echo "scale=0; sqrt($dx*$dx + $dy*$dy)" | bc -l)
-    if [ "$dist" -le "$SPRO_R" ]; then return 0; else return 1; fi
+    if [ "$dist" -le "$ZRDN_R" ]; then return 0; else return 1; fi
 }
 
 declare -A PREV_X PREV_Y
 declare -A REPORTED_IDS
 
-echo "[$SPRO_NAME] Система ПРО Омск запущена. Противоракет: $CURRENT_AMMO. Ждем БР..."
+echo "[$ZRDN_NAME] Дивизион запущен. Ракет: $CURRENT_AMMO. Ждем цели..."
 
 while true; do
     FILES=$(ls -t "$TARGETS_DIR" 2>/dev/null | head -n 50)
@@ -62,6 +68,7 @@ while true; do
         CUR_X=$(echo "$DATA" | grep -oP 'X:\s*\K\d+')
         CUR_Y=$(echo "$DATA" | grep -oP 'Y:\s*\K\d+')
 
+        # Наши золотые патчи от багов
         if [[ -z "$CUR_X" || -z "$CUR_Y" || ${#CUR_X} -lt 5 || ${#CUR_Y} -lt 5 ]]; then continue; fi
         if ! check_visibility "$CUR_X" "$CUR_Y"; then continue; fi
         
@@ -79,37 +86,41 @@ while true; do
         V=$(echo "scale=0; sqrt($DX*$DX + $DY*$DY)" | bc -l)
         V=${V%.*}
 
-        # СПРО бьет ТОЛЬКО Баллистические ракеты (>= 8000 м/с)
-        if [ "$V" -ge 8000 ]; then
+        # ЗРДН бьет только КР и Самолеты (до 1000 м/с)
+        if [ "$V" -le 1000 ]; then
             TIMESTAMP=$(date +"%H:%M:%S:%3N")
+            if [ "$V" -ge 250 ]; then TYPE_STR="КР"; else TYPE_STR="Самолет"; fi
             
-            MSG="Обнаружена БР ID:$ID с координатами $CUR_X $CUR_Y"
-            echo "[$SPRO_NAME] $TIMESTAMP $MSG"
-            echo "$(date +%d.%m) $TIMESTAMP $SPRO_NAME $MSG" >> "$MESSAGES_LOG"
+            MSG="Обнаружен $TYPE_STR ID:$ID с координатами $CUR_X $CUR_Y"
+            echo "[$ZRDN_NAME] $TIMESTAMP $MSG"
+            echo "$(date +%d.%m) $TIMESTAMP $ZRDN_NAME $MSG" >> "$MESSAGES_LOG"
 
             # ЛОГИКА СТРЕЛЬБЫ
             if [ "$CURRENT_AMMO" -gt 0 ]; then
-                echo "$SPRO_NAME" > "$DESTROY_DIR/$ID"
+                # ТЗ: Для попытки уничтожения цели необходимо создать файл в каталоге Destroy
+                echo "$ZRDN_NAME" > "$DESTROY_DIR/$ID"
                 ((CURRENT_AMMO--))
                 
-                MSG_FIRE="Произведен пуск противоракеты по ID:$ID. Остаток: $CURRENT_AMMO"
-                echo "[$SPRO_NAME] $TIMESTAMP $MSG_FIRE"
-                echo "$(date +%d.%m) $TIMESTAMP $SPRO_NAME $MSG_FIRE" >> "$MESSAGES_LOG"
+                MSG_FIRE="Произведен пуск по ID:$ID. Остаток ракет: $CURRENT_AMMO"
+                echo "[$ZRDN_NAME] $TIMESTAMP $MSG_FIRE"
+                echo "$(date +%d.%m) $TIMESTAMP $ZRDN_NAME $MSG_FIRE" >> "$MESSAGES_LOG"
 
                 if [ "$CURRENT_AMMO" -eq 0 ]; then
-                    MSG_EMPTY="ВНИМАНИЕ! БОЕКОМПЛЕКТ ПРО ИСЧЕРПАН. ПЕРЕХОД В РЕЖИМ ОБНАРУЖЕНИЯ."
-                    echo "[$SPRO_NAME] $MSG_EMPTY"
-                    echo "$(date +%d.%m) $TIMESTAMP $SPRO_NAME $MSG_EMPTY" >> "$MESSAGES_LOG"
+                    MSG_EMPTY="ВНИМАНИЕ! БОЕКОМПЛЕКТ ИСЧЕРПАН. ПЕРЕХОД В РЕЖИМ ОБНАРУЖЕНИЯ."
+                    echo "[$ZRDN_NAME] $MSG_EMPTY"
+                    echo "$(date +%d.%m) $TIMESTAMP $ZRDN_NAME $MSG_EMPTY" >> "$MESSAGES_LOG"
                 fi
             fi
 
             REPORTED_IDS[$ID]=1
         fi
 
+        # Патч: обновление координат
         PREV_X[$ID]=$CUR_X
         PREV_Y[$ID]=$CUR_Y
     done
 
+    # Очистка памяти
     for id in "${!PREV_X[@]}"; do
         if [[ -z "${SEEN_NOW[$id]}" ]]; then
             unset PREV_X[$id] PREV_Y[$id] REPORTED_IDS[$id]

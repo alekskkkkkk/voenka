@@ -1,0 +1,5 @@
+*.pid
+*.log
+*.tmp
+vko_base.txt
+nsd_alerts.log

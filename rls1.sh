@@ -16,7 +16,7 @@ if [[ $EUID -eq 0 ]]; then
     exit 1
 fi
 
-# Подключаем конфиг (скрипт ищет config.cfg в той же папке, где лежит сам)
+# Подключаем конфиг
 SOURCE_DIR=$(dirname "$(readlink -f "$0")")
 if [ -f "$SOURCE_DIR/config.cfg" ]; then
     source "$SOURCE_DIR/config.cfg"
@@ -25,13 +25,17 @@ else
     exit 1
 fi
 
-RLS_NAME=$RLS2_NAME
-RLS_X=$RLS2_X
-RLS_Y=$RLS2_Y
-RLS_R=$RLS2_R
-RLS_AZ=$RLS2_AZIMUTH
-RLS_FOV=$RLS2_FOV
-PID_FILE="$SOURCE_DIR/rls_2.pid"
+# ==========================================
+# ПАРАМЕТРЫ РЛС (Меняем только этот блок для 2 и 3)
+# ==========================================
+RLS_NAME=$RLS1_NAME
+RLS_X=$RLS1_X
+RLS_Y=$RLS1_Y
+RLS_R=$RLS1_R
+RLS_AZ=$RLS1_AZIMUTH
+RLS_FOV=$RLS1_FOV
+PID_FILE="$SOURCE_DIR/rls_1.pid"
+# ==========================================
 
 MESSAGES_LOG="/tmp/vko_messages.log"
 TARGETS_DIR="/tmp/GenTargets/Targets"
