@@ -16,7 +16,6 @@ if [[ $EUID -eq 0 ]]; then
     exit 1
 fi
 
-# Подключаем конфиг (скрипт ищет config.cfg в той же папке, где лежит сам)
 SOURCE_DIR=$(dirname "$(readlink -f "$0")")
 if [ -f "$SOURCE_DIR/config.cfg" ]; then
     source "$SOURCE_DIR/config.cfg"
@@ -88,7 +87,7 @@ echo "[$RLS_NAME] Станция запущена. Ждем появления �
 
 while true; do
     FILES=$(ls -t "$TARGETS_DIR" 2>/dev/null | head -n 50)
-    declare -A SEEN_NOW # <- ДОБАВИЛИ МАССИВ ТЕКУЩИХ ЦЕЛЕЙ
+    declare -A SEEN_NOW # ДОБАВИЛИ МАССИВ ТЕКУЩИХ ЦЕЛЕЙ
     
     for file in $FILES; do
         ID=$(decrypt_id "$file")
@@ -99,14 +98,14 @@ while true; do
         CUR_Y=$(echo "$DATA" | grep -oP 'Y:\s*\K\d+')
 
         if [[ -z "$CUR_X" || -z "$CUR_Y" ]]; then
-            continue # Файл еще пишется генератором, ждем следующей секунды
+            continue 
         fi
 
         if ! check_visibility "$CUR_X" "$CUR_Y"; then continue; fi
         
-        SEEN_NOW[$ID]=1 # <- ЗАПОМИНАЕМ, ЧТО ВИДИМ ЕЁ СЕЙЧАС
+        SEEN_NOW[$ID]=1 # ЗАПОМИНАЕМ, ЧТО ВИДИМ ЕЁ СЕЙЧАС
 
-        # Если уже докладывали - просто игнорируем (не пишем в лог)
+        # Если уже докладывали - просто игнорируем 
         [[ -n "${REPORTED_IDS[$ID]}" ]] && continue
 
         if [[ -z "${PREV_X[$ID]}" ]]; then
@@ -136,13 +135,13 @@ while true; do
                 echo "$(date +%d.%m) $TIMESTAMP $RLS_NAME $MSG_SPRO" >> "$MESSAGES_LOG"
             fi
 
-            REPORTED_IDS[$ID]=1 # <- ПОМЕЧАЕМ КАК ОТРАБОТАННУЮ
+            REPORTED_IDS[$ID]=1 # ПОМЕЧАЕМ КАК ОТРАБОТАННУЮ
         fi
         PREV_X[$ID]=$CUR_X
         PREV_Y[$ID]=$CUR_Y
     done
 
-    # ИСПРАВЛЕННАЯ ОЧИСТКА ПАМЯТИ
+    # ОЧИСТКА ПАМЯТИ
     for id in "${!PREV_X[@]}"; do
         if [[ -z "${SEEN_NOW[$id]}" ]]; then
             unset PREV_X[$id] PREV_Y[$id] REPORTED_IDS[$id]
