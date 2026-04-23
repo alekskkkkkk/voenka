@@ -16,7 +16,6 @@ if [[ $EUID -eq 0 ]]; then
     exit 1
 fi
 
-# Подключаем конфиг (скрипт ищет config.cfg в той же папке, где лежит сам)
 SOURCE_DIR=$(dirname "$(readlink -f "$0")")
 if [ -f "$SOURCE_DIR/config.cfg" ]; then
     source "$SOURCE_DIR/config.cfg"

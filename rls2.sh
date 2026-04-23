@@ -88,7 +88,7 @@ echo "[$RLS_NAME] Станция запущена. Ждем появления �
 
 while true; do
     FILES=$(ls -t "$TARGETS_DIR" 2>/dev/null | head -n 50)
-    declare -A SEEN_NOW # <- ДОБАВИЛИ МАССИВ ТЕКУЩИХ ЦЕЛЕЙ
+    declare -A SEEN_NOW 
     
     for file in $FILES; do
         ID=$(decrypt_id "$file")
