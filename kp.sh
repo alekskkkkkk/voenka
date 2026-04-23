@@ -2,6 +2,38 @@
 
 LOG_FILE="/tmp/vko_messages.log"
 DB_FILE="vko_base.txt" 
+#!/bin/bash
+
+SOURCE_DIR=$(dirname "$(readlink -f "$0")")
+if [ -f "$SOURCE_DIR/config.cfg" ]; then source "$SOURCE_DIR/config.cfg"; fi
+
+
+
+check_status() {
+    local pid_file="$SOURCE_DIR/$1.pid"
+    if [ -f "$pid_file" ]; then
+        local pid=$(cat "$pid_file")
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "АКТИВЕН (PID: $pid)"
+        else
+            echo "НЕ АКТИВЕН (Процесс упал)"
+        fi
+    else
+        echo "НЕ ЗАПУЩЕН"
+    fi
+}
+
+echo "=== МОНИТОРИНГ СОСТОЯНИЯ ОБЪЕКТОВ ВКО ==="
+printf "%-10s | %-20s\n" "ОБЪЕКТ" "СТАТУС"
+echo "------------------------------------------"
+printf "%-10s | %-20s\n" "RLS_1" "$(check_status rls_1)"
+printf "%-10s | %-20s\n" "RLS_2" "$(check_status rls_2)"
+printf "%-10s | %-20s\n" "RLS_3" "$(check_status rls_3)"
+printf "%-10s | %-20s\n" "ZRDN_1" "$(check_status zrdn_1)"
+printf "%-10s | %-20s\n" "ZRDN_2" "$(check_status zrdn_2)"
+printf "%-10s | %-20s\n" "ZRDN_3" "$(check_status zrdn_3)"
+printf "%-10s | %-20s\n" "SPRO" "$(check_status spro)"
+echo "------------------------------------------"
 
 if [ ! -f "$LOG_FILE" ]; then
     echo "Ошибка: Лог-файл $LOG_FILE не найден. Сначала запустите систему ВКО."
