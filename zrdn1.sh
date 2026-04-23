@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# --- ПРОВЕРКИ БЕЗОПАСНОСТИ ---
+
 if [[ "$OSTYPE" != "linux-gnu"* || -z "$BASH_VERSION" || $EUID -eq 0 ]]; then exit 1; fi
 
 SOURCE_DIR=$(dirname "$(readlink -f "$0")")
@@ -10,9 +10,7 @@ else
     exit 1
 fi
 
-# ==========================================
-# ПАРАМЕТРЫ ЗРДН (Менять для zrdn2 и zrdn3)
-# ==========================================
+
 ZRDN_NAME=$ZRDN1_NAME
 ZRDN_X=$ZRDN1_X
 ZRDN_Y=$ZRDN1_Y
@@ -42,7 +40,7 @@ decrypt_id() {
     echo -n "$hex_id" | xxd -r -p 2>/dev/null
 }
 
-# Для ЗРДН зона - это просто круг (Пифагор)
+
 check_visibility() {
     local tx=$1 ty=$2
     local dx=$((tx - ZRDN_X))
@@ -68,7 +66,7 @@ while true; do
         CUR_X=$(echo "$DATA" | grep -oP 'X:\s*\K\d+')
         CUR_Y=$(echo "$DATA" | grep -oP 'Y:\s*\K\d+')
 
-        # Наши золотые патчи от багов
+
         if [[ -z "$CUR_X" || -z "$CUR_Y" || ${#CUR_X} -lt 5 || ${#CUR_Y} -lt 5 ]]; then continue; fi
         if ! check_visibility "$CUR_X" "$CUR_Y"; then continue; fi
         
@@ -97,7 +95,7 @@ while true; do
 
             # ЛОГИКА СТРЕЛЬБЫ
             if [ "$CURRENT_AMMO" -gt 0 ]; then
-                # ТЗ: Для попытки уничтожения цели необходимо создать файл в каталоге Destroy
+    
                 echo "$ZRDN_NAME" > "$DESTROY_DIR/$ID"
                 ((CURRENT_AMMO--))
                 
@@ -115,12 +113,12 @@ while true; do
             REPORTED_IDS[$ID]=1
         fi
 
-        # Патч: обновление координат
+    
         PREV_X[$ID]=$CUR_X
         PREV_Y[$ID]=$CUR_Y
     done
 
-    # Очистка памяти
+ 
     for id in "${!PREV_X[@]}"; do
         if [[ -z "${SEEN_NOW[$id]}" ]]; then
             unset PREV_X[$id] PREV_Y[$id] REPORTED_IDS[$id]

@@ -10,22 +10,20 @@ else
     exit 1
 fi
 
-# ==========================================
-# ПАРАМЕТРЫ ЗРДН (Менять для zrdn2 и zrdn3)
-# ==========================================
+
 ZRDN_NAME=$ZRDN3_NAME
 ZRDN_X=$ZRDN3_X
 ZRDN_Y=$ZRDN3_Y
 ZRDN_R=$ZRDN3_R
 CURRENT_AMMO=$ZRDN3_AMMO
 PID_FILE="$SOURCE_DIR/zrdn_3.pid"
-# ==========================================
+
 
 MESSAGES_LOG="/tmp/vko_messages.log"
 TARGETS_DIR="/tmp/GenTargets/Targets"
 DESTROY_DIR="/tmp/GenTargets/Destroy"
 
-# ЗРДН создает папку уничтожения, если её нет
+
 mkdir -p "$DESTROY_DIR"
 
 if [ -f "$PID_FILE" ]; then
@@ -42,7 +40,7 @@ decrypt_id() {
     echo -n "$hex_id" | xxd -r -p 2>/dev/null
 }
 
-# Для ЗРДН зона - это просто круг (Пифагор)
+
 check_visibility() {
     local tx=$1 ty=$2
     local dx=$((tx - ZRDN_X))
@@ -68,7 +66,6 @@ while true; do
         CUR_X=$(echo "$DATA" | grep -oP 'X:\s*\K\d+')
         CUR_Y=$(echo "$DATA" | grep -oP 'Y:\s*\K\d+')
 
-        # Наши золотые патчи от багов
         if [[ -z "$CUR_X" || -z "$CUR_Y" || ${#CUR_X} -lt 5 || ${#CUR_Y} -lt 5 ]]; then continue; fi
         if ! check_visibility "$CUR_X" "$CUR_Y"; then continue; fi
         
@@ -97,7 +94,6 @@ while true; do
 
             # ЛОГИКА СТРЕЛЬБЫ
             if [ "$CURRENT_AMMO" -gt 0 ]; then
-                # ТЗ: Для попытки уничтожения цели необходимо создать файл в каталоге Destroy
                 echo "$ZRDN_NAME" > "$DESTROY_DIR/$ID"
                 ((CURRENT_AMMO--))
                 
@@ -115,7 +111,7 @@ while true; do
             REPORTED_IDS[$ID]=1
         fi
 
-        # Патч: обновление координат
+
         PREV_X[$ID]=$CUR_X
         PREV_Y[$ID]=$CUR_Y
     done

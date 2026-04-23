@@ -25,9 +25,7 @@ else
     exit 1
 fi
 
-# ==========================================
-# ПАРАМЕТРЫ РЛС (Меняем только этот блок для 2 и 3)
-# ==========================================
+
 RLS_NAME=$RLS1_NAME
 RLS_X=$RLS1_X
 RLS_Y=$RLS1_Y
@@ -40,7 +38,7 @@ PID_FILE="$SOURCE_DIR/rls_1.pid"
 MESSAGES_LOG="/tmp/vko_messages.log"
 TARGETS_DIR="/tmp/GenTargets/Targets"
 
-# Защита от двойного запуска
+
 if [ -f "$PID_FILE" ]; then
     PID=$(cat "$PID_FILE")
     if kill -0 "$PID" 2>/dev/null; then
