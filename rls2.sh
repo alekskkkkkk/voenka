@@ -94,7 +94,7 @@ while true; do
         ID=$(decrypt_id "$file")
         [[ -z "$ID" ]] && continue
         
-        DATA=$(head -n 1 "$TARGETS_DIR/$file")
+        DATA=$(head -n 1 "$TARGETS_DIR/$file" 2>/dev/null)
         CUR_X=$(echo "$DATA" | grep -oP 'X:\s*\K\d+')
         CUR_Y=$(echo "$DATA" | grep -oP 'Y:\s*\K\d+')
 

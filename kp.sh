@@ -1,47 +1,98 @@
 #!/bin/bash
 
-LOG_FILE="/tmp/vko_messages.log"
-DB_FILE="vko_base.txt" 
+if [[ "$OSTYPE" != "linux-gnu"* || -z "$BASH_VERSION" || $EUID -eq 0 ]]; then exit 1; fi
+
+SOURCE_DIR=$(dirname "$(readlink -f "$0")")
+LOG_FILE="$SOURCE_DIR/vko_messages.log"
+DB_FILE="$SOURCE_DIR/vko_base.db"
+SQL_TEMP="$SOURCE_DIR/temp_insert.sql"
+
+echo "========================================================"
+echo "    КОМАНДНЫЙ ПУНКТ (КП) - СТАТУС И СТАТИСТИКА"
+echo "========================================================"
+
+# --- 1. МОНИТОРИНГ ЖИВУЧЕСТИ СИСТЕМ (PID) ---
+printf "%-10s | %-20s\n" "ОБЪЕКТ" "СОСТОЯНИЕ"
+echo "--------------------------------------------------------"
+systems=("RLS_1:rls_1.pid" "RLS_2:rls_2.pid" "RLS_3:rls_3.pid" "ZRDN_1:zrdn_1.pid" "ZRDN_2:zrdn_2.pid" "ZRDN_3:zrdn_3.pid" "SPRO:spro.pid")
+
+for sys in "${systems[@]}"; do
+    name="${sys%%:*}"
+    pid_file="$SOURCE_DIR/${sys##*:}"
+    
+    if [ -f "$pid_file" ]; then
+        pid=$(cat "$pid_file")
+        if kill -0 "$pid" 2>/dev/null; then
+            printf "%-10s | \e[32mАКТИВЕН\e[0m (PID: %s)\n" "$name" "$pid"
+        else
+            printf "%-10s | \e[31mНЕ АКТИВЕН\e[0m (Упал)\n" "$name"
+        fi
+    else
+        printf "%-10s | \e[33mНЕ ЗАПУЩЕН\e[0m\n" "$name"
+    fi
+done
+echo "========================================================"
 
 if [ ! -f "$LOG_FILE" ]; then
-    echo "Ошибка: Лог-файл $LOG_FILE не найден. Сначала запустите систему ВКО."
+    echo "Журнал $LOG_FILE пуст или не найден. Статистика недоступна."
     exit 1
 fi
 
+# --- 2. ЭКСПОРТ ДАННЫХ В SQLITE ---
+echo "Обновление базы данных (SQLite)..."
 
-cp "$LOG_FILE" "$DB_FILE"
+# Создаем таблицу
+sqlite3 "$DB_FILE" "DROP TABLE IF EXISTS logs; CREATE TABLE logs (date TEXT, time TEXT, system TEXT, message TEXT);"
 
-echo "=== КОМАНДНЫЙ ПУНКТ (КП) - АНАЛИЗ БАЗЫ ДАННЫХ ==="
-echo "Текстовая БД обновлена: $DB_FILE"
+# Открываем транзакцию для быстрой записи
+echo "BEGIN TRANSACTION;" > "$SQL_TEMP"
+
+while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    
+    # Разбиваем строчку лога на переменные (Дата, Время, Имя системы, Сообщение)
+    D=$(echo "$line" | awk '{print $1}')
+    T=$(echo "$line" | awk '{print $2}')
+    S=$(echo "$line" | awk '{print $3}')
+    M=$(echo "$line" | awk '{for(i=4;i<=NF;i++) printf $i" "; print ""}')
+    
+    M="${M//\'/\'\'}" # Экранируем кавычки для безопасности SQL
+    echo "INSERT INTO logs (date, time, system, message) VALUES ('$D', '$T', '$S', '$M');" >> "$SQL_TEMP"
+done < "$LOG_FILE"
+
+echo "COMMIT;" >> "$SQL_TEMP"
+
+# Выполняем SQL и удаляем временный файл
+sqlite3 "$DB_FILE" < "$SQL_TEMP"
+rm -f "$SQL_TEMP"
+
+echo -e "\e[32m[OK] Данные успешно загружены в базу: $DB_FILE\e[0m"
 echo "--------------------------------------------------------"
-echo "СТАТИСТИКА БОЕВЫХ ДЕЙСТВИЙ:"
+
+# --- 3. SQL-ЗАПРОСЫ К БАЗЕ ДАННЫХ (СТАТИСТИКА) ---
+echo "                  АНАЛИТИКА БД"
 echo "--------------------------------------------------------"
 
-# 1. Расход боекомплекта
-echo "[1] Расход боекомплекта (Количество пусков по системам):"
-echo "СИСТЕМА     ПУСКОВ"
-echo "------------------"
-grep "Произведен пуск" "$DB_FILE" | grep -oE "ZRDN_[1-3]|SPRO" | sort | uniq -c | sort -nr | awk '{printf "%-10s %s\n", $2, $1}'
+echo "[1] Расход ракет (Пуски по системам):"
+sqlite3 -header -column "$DB_FILE" "SELECT system AS 'Система', COUNT(*) AS 'Пусков' FROM logs WHERE message LIKE '%Произведен пуск%' GROUP BY system ORDER BY COUNT(*) DESC;"
 echo ""
 
-# 2. Активность радаров
-echo "[2] Активность систем (Количество обнаруженных целей):"
-echo "СИСТЕМА     ОБНАРУЖЕНО"
-echo "----------------------"
-grep -E "Обнаружена цель|Обнаружена БР|Обнаружен Самолет|Обнаружен КР" "$DB_FILE" | grep -oE "RLS_[1-3]|ZRDN_[1-3]|SPRO" | sort | uniq -c | sort -nr | awk '{printf "%-10s %s\n", $2, $1}'
+echo "[2] Точность (Количество подтвержденных уничтожений):"
+sqlite3 -header -column "$DB_FILE" "SELECT system AS 'Система', COUNT(*) AS 'Сбито целей' FROM logs WHERE message LIKE '%УНИЧТОЖЕНА%' GROUP BY system ORDER BY COUNT(*) DESC;"
 echo ""
 
-# 3. Ситуация с боекомплектом
-echo "[3] Ситуация с боекомплектом (Кто исчерпал боезапас):"
-echo "СИСТЕМА"
-echo "--------------------"
-grep "БОЕКОМПЛЕКТ ИСЧЕРПАН" "$DB_FILE" | grep -oE "ZRDN_[1-3]|SPRO" | uniq
+echo "[3] Ситуация с боекомплектом (Внимание: БК исчерпан):"
+sqlite3 -header -column "$DB_FILE" "SELECT DISTINCT system AS 'Система (Пустой БК)' FROM logs WHERE message LIKE '%БОЕКОМПЛЕКТ ИСЧЕРПАН%';"
 echo ""
 
-# 4. Общая статистика системы ПРО
-echo "[4] Общая статистика системы СПРО (Омск):"
-SPRO_FIRE=$(grep "Произведен пуск" "$DB_FILE" | grep "SPRO" | wc -l)
-SPRO_DETECT=$(grep "Обнаружена БР" "$DB_FILE" | grep "SPRO" | wc -l)
-echo "Обнаружено баллистических ракет: $SPRO_DETECT"
-echo "Выпущено противоракет: $SPRO_FIRE"
-echo "--------------------------------------------------------"
+echo "[4] Пропуски целей (Нехватка БК):"
+sqlite3 -header -column "$DB_FILE" "SELECT system AS 'Система', COUNT(*) AS 'Пропущено целей' FROM logs WHERE message LIKE '%НО БОЕПРИПАСЫ ОТСУТСТВУЮТ%' GROUP BY system;"
+echo ""
+
+echo "[5] Эффективность ПРО Омска (СПРО):"
+sqlite3 -header -column "$DB_FILE" "
+SELECT 
+    (SELECT COUNT(*) FROM logs WHERE system='SPRO' AND message LIKE '%Обнаружена БР%') AS 'Обнаружено БР',
+    (SELECT COUNT(*) FROM logs WHERE system='SPRO' AND message LIKE '%Произведен пуск%') AS 'Выпущено ракет',
+    (SELECT COUNT(*) FROM logs WHERE system='SPRO' AND message LIKE '%УНИЧТОЖЕНА%') AS 'Уничтожено БР';"
+echo "========================================================"
