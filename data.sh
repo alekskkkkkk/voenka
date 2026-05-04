@@ -3,9 +3,9 @@
 TARGETS_DIR="/tmp/GenTargets/Targets"
 DATA_FILE="/tmp/air_situation.txt"
 
-# Хранилище для расчета параметров и отслеживания состояния
+
 declare -A PREV_X PREV_Y
-declare -A CURRENT_IDS  # Список ID, которые были в прошлом цикле
+declare -A CURRENT_IDS  
 
 decrypt_id() {
     local filename=$1
@@ -31,7 +31,7 @@ while true; do
     printf "%-10s | %-12s | %-8s | %-10s | %-10s\n" "ID" "ТИП" "V м/с" "X" "Y"
     echo "----------------------------------------------------------------------"
 
-    # Массив для ID, которые мы увидим в ЭТОМ цикле
+
     declare -A SEEN_NOW
     declare -A NEW_PREV_X NEW_PREV_Y
 
@@ -58,34 +58,33 @@ while true; do
             else TYPE="САМОЛЕТ"; COLOR="\e[32m"; fi
         fi
 
-        # Вывод строки цели
+ 
         printf "${COLOR}%-10s | %-12s | %-8s | %-10s | %-10s\e[0m\n" \
                "$ID" "$TYPE" "$V" "$CUR_X" "$CUR_Y"
 
-        # Пишем в шину для клиентов
+   
         echo "$ID $TYPE $CUR_X $CUR_Y $V ${PREV_X[$ID]:-0} ${PREV_Y[$ID]:-0}" >> "${DATA_FILE}.tmp"
 
         NEW_PREV_X[$ID]=$CUR_X
         NEW_PREV_Y[$ID]=$CUR_Y
     done
 
-    # ПРОВЕРКА НА УНИЧТОЖЕНИЕ (сравнение старых ID с новыми)
+
     for old_id in "${!CURRENT_IDS[@]}"; do
         if [[ -z "${SEEN_NOW[$old_id]}" ]]; then
             echo -e "\e[41m\e[37m[ СОБЫТИЕ ] Цель $old_id уничтожена или потеряна \e[0m"
-            # Можно добавить запись этого события в лог КП
+        
             echo "$(date +%T) Цель $old_id пропала с радаров" >> ./battle_history.log
         fi
     done
 
-    # Обновляем список "живых" ID для следующего цикла
     unset CURRENT_IDS
     declare -A CURRENT_IDS
     for id in "${!SEEN_NOW[@]}"; do
         CURRENT_IDS[$id]=1
     done
 
-    # Синхронизация координат
+
     unset PREV_X PREV_Y
     declare -A PREV_X PREV_Y
     for id in "${!NEW_PREV_X[@]}"; do

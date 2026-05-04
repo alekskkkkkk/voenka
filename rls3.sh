@@ -1,28 +1,14 @@
 #!/bin/bash
 
-# --- ПРОВЕРКИ БЕЗОПАСНОСТИ ---
-if [[ "$OSTYPE" != "linux-gnu"* ]]; then
-    echo "Ошибка: Данная система должна запускаться только в среде Linux."
-    exit 1
-fi
-
-if [ -z "$BASH_VERSION" ]; then
-    echo "Ошибка: Скрипт должен исполняться через интерпретатор Bash."
-    exit 1
-fi
-
-if [[ $EUID -eq 0 ]]; then
-    echo "Ошибка: Запуск от имени администратора (root) запрещен."
-    exit 1
-fi
+if [[ "$OSTYPE" != "linux-gnu"* || -z "$BASH_VERSION" || $EUID -eq 0 ]]; then exit 1; fi
 
 SOURCE_DIR=$(dirname "$(readlink -f "$0")")
 if [ -f "$SOURCE_DIR/config.cfg" ]; then
     source "$SOURCE_DIR/config.cfg"
 else
-    echo "Ошибка: Файл config.cfg не найден!"
     exit 1
 fi
+
 
 RLS_NAME=$RLS3_NAME
 RLS_X=$RLS3_X
@@ -32,27 +18,40 @@ RLS_AZ=$RLS3_AZIMUTH
 RLS_FOV=$RLS3_FOV
 PID_FILE="$SOURCE_DIR/rls_3.pid"
 
-MESSAGES_LOG="/tmp/vko_messages.log"
+
+MESSAGES_LOG="$SOURCE_DIR/vko_messages.log"
+
+ENC_LOG="$SOURCE_DIR/${RLS_NAME}_enc.log"
+
 TARGETS_DIR="/tmp/GenTargets/Targets"
 
-# Защита от двойного запуска
 if [ -f "$PID_FILE" ]; then
     PID=$(cat "$PID_FILE")
-    if kill -0 "$PID" 2>/dev/null; then
-        echo "Ошибка: $RLS_NAME уже запущена (PID: $PID)."
-        exit 1
-    fi
+    if kill -0 "$PID" 2>/dev/null; then exit 1; fi
 fi
 echo $$ > "$PID_FILE"
 trap "rm -f $PID_FILE; exit" INT TERM EXIT
 
-# Функции
+
+
+write_log() {
+    local ts="$1"
+    local msg="$2"
+    local log_line="$(date +%d.%m) $ts $RLS_NAME $msg"
+
+   
+    echo "$log_line" >> "$MESSAGES_LOG"
+
+    
+    local encoded=$(echo -n "$log_line" | base64 -w 0 | rev)
+    echo "$encoded" >> "$ENC_LOG"
+}
+
+
 decrypt_id() {
     local filename=$1
     local hex_id=""
-    for (( i=2; i<${#filename}-2; i+=4 )); do
-        hex_id="${hex_id}${filename:$i:2}"
-    done
+    for (( i=2; i<${#filename}-2; i+=4 )); do hex_id="${hex_id}${filename:$i:2}"; done
     echo -n "$hex_id" | xxd -r -p 2>/dev/null
 }
 
@@ -87,25 +86,21 @@ echo "[$RLS_NAME] Станция запущена. Ждем появления �
 
 while true; do
     FILES=$(ls -t "$TARGETS_DIR" 2>/dev/null | head -n 50)
-    declare -A SEEN_NOW # <- ДОБАВИЛИ МАССИВ ТЕКУЩИХ ЦЕЛЕЙ
+    declare -A SEEN_NOW
     
     for file in $FILES; do
         ID=$(decrypt_id "$file")
         [[ -z "$ID" ]] && continue
         
+        
         DATA=$(head -n 1 "$TARGETS_DIR/$file" 2>/dev/null)
         CUR_X=$(echo "$DATA" | grep -oP 'X:\s*\K\d+')
         CUR_Y=$(echo "$DATA" | grep -oP 'Y:\s*\K\d+')
 
-        if [[ -z "$CUR_X" || -z "$CUR_Y" ]]; then
-            continue # Файл еще пишется генератором, ждем следующей секунды
-        fi
-
+        if [[ -z "$CUR_X" || -z "$CUR_Y" ]]; then continue; fi
         if ! check_visibility "$CUR_X" "$CUR_Y"; then continue; fi
         
-        SEEN_NOW[$ID]=1 # <- ЗАПОМИНАЕМ, ЧТО ВИДИМ ЕЁ СЕЙЧАС
-
-        # Если уже докладывали - просто игнорируем (не пишем в лог)
+        SEEN_NOW[$ID]=1
         [[ -n "${REPORTED_IDS[$ID]}" ]] && continue
 
         if [[ -z "${PREV_X[$ID]}" ]]; then
@@ -117,14 +112,15 @@ while true; do
         DX=$((CUR_X - PREV_X[$ID]))
         DY=$((CUR_Y - PREV_Y[$ID]))
         V=$(echo "scale=0; sqrt($DX*$DX + $DY*$DY)" | bc -l)
-        
         V=${V%.*}
+        
         if [ "$V" -ge 8000 ]; then
             TIMESTAMP=$(date +"%H:%M:%S:%3N")
-            
             MSG="Обнаружена цель ID:$ID с координатами $CUR_X $CUR_Y"
+            
             echo "[$RLS_NAME] $TIMESTAMP $MSG"
-            echo "$(date +%d.%m) $TIMESTAMP $RLS_NAME $MSG" >> "$MESSAGES_LOG"
+            
+            write_log "$TIMESTAMP" "$MSG"
 
             D1=$(get_dist_to_spro "${PREV_X[$ID]}" "${PREV_Y[$ID]}")
             D2=$(get_dist_to_spro "$CUR_X" "$CUR_Y")
@@ -132,16 +128,15 @@ while true; do
             if (( $(echo "$D2 < $D1" | bc -l) )); then
                 MSG_SPRO="Цель ID:$ID движется в направлении СПРО"
                 echo "[$RLS_NAME] $TIMESTAMP $MSG_SPRO"
-                echo "$(date +%d.%m) $TIMESTAMP $RLS_NAME $MSG_SPRO" >> "$MESSAGES_LOG"
+                write_log "$TIMESTAMP" "$MSG_SPRO"
             fi
 
-            REPORTED_IDS[$ID]=1 # <- ПОМЕЧАЕМ КАК ОТРАБОТАННУЮ
+            REPORTED_IDS[$ID]=1
         fi
         PREV_X[$ID]=$CUR_X
         PREV_Y[$ID]=$CUR_Y
     done
 
-    # ИСПРАВЛЕННАЯ ОЧИСТКА ПАМЯТИ
     for id in "${!PREV_X[@]}"; do
         if [[ -z "${SEEN_NOW[$id]}" ]]; then
             unset PREV_X[$id] PREV_Y[$id] REPORTED_IDS[$id]
