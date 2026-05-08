@@ -34,17 +34,21 @@ trap "rm -f $PID_FILE; exit" INT TERM EXIT
 
 
 
+
+MESSAGES_LOG="$SOURCE_DIR/vko_messages.log"
+MSG_BUFFER="$SOURCE_DIR/${RLS_NAME}.msg"
+
 write_log() {
     local ts="$1"
     local msg="$2"
     local log_line="$(date +%d.%m) $ts $RLS_NAME $msg"
 
-   
+    # Пишем в общий лог для сверки
     echo "$log_line" >> "$MESSAGES_LOG"
-
     
+    # Шифруем и отправляем в персональный буфер
     local encoded=$(echo -n "$log_line" | base64 -w 0 | rev)
-    echo "$encoded" >> "$ENC_LOG"
+    echo "$encoded" >> "$MSG_BUFFER"
 }
 
 
@@ -85,6 +89,7 @@ declare -A REPORTED_IDS
 echo "[$RLS_NAME] Станция запущена. Ждем появления целей..."
 
 while true; do
+    touch "$SOURCE_DIR/${RLS_NAME}.hb"
     FILES=$(ls -t "$TARGETS_DIR" 2>/dev/null | head -n 50)
     declare -A SEEN_NOW
     

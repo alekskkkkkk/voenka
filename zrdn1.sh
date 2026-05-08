@@ -34,17 +34,19 @@ echo $$ > "$PID_FILE"
 trap "rm -f $PID_FILE; exit" INT TERM EXIT
 
 
+
+MESSAGES_LOG="$SOURCE_DIR/vko_messages.log"
+MSG_BUFFER="$SOURCE_DIR/${ZRDN_NAME}.msg"
+
 write_log() {
     local ts="$1"
     local msg="$2"
     local log_line="$(date +%d.%m) $ts $ZRDN_NAME $msg"
 
-    
     echo "$log_line" >> "$MESSAGES_LOG"
     
-   
     local encoded=$(echo -n "$log_line" | base64 -w 0 | rev)
-    echo "$encoded" >> "$ENC_LOG"
+    echo "$encoded" >> "$MSG_BUFFER"
 }
 
 decrypt_id() {
@@ -69,6 +71,7 @@ declare -A FIRED_TARGETS
 echo "[$ZRDN_NAME] Дивизион запущен. Ракет: $CURRENT_AMMO. Ждем цели..."
 
 while true; do
+    touch "$SOURCE_DIR/${ZRDN_NAME}.hb"
     FILES=$(ls -t "$TARGETS_DIR" 2>/dev/null | head -n 50)
     declare -A SEEN_NOW
     
