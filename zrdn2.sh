@@ -9,17 +9,16 @@ else
     exit 1
 fi
 
-
+# ВНИМАНИЕ: Для zrdn2.sh и zrdn3.sh поменяй здесь ZRDN1 на ZRDN2 или ZRDN3
 ZRDN_NAME=$ZRDN2_NAME
 ZRDN_X=$ZRDN2_X
 ZRDN_Y=$ZRDN2_Y
 ZRDN_R=$ZRDN2_R
 CURRENT_AMMO=$ZRDN2_AMMO
-PID_FILE="$SOURCE_DIR/zrdn_2.pid"
+PID_FILE="$SOURCE_DIR/zrdn_2.pid" # Не забудь поменять имя pid-файла для других зрдн!
 
 MESSAGES_LOG="$SOURCE_DIR/vko_messages.log"
-
-ENC_LOG="$SOURCE_DIR/${ZRDN_NAME}_enc.log"
+MSG_BUFFER="$SOURCE_DIR/${ZRDN_NAME}.msg"
 
 TARGETS_DIR="/tmp/GenTargets/Targets"
 DESTROY_DIR="/tmp/GenTargets/Destroy"
@@ -32,11 +31,6 @@ if [ -f "$PID_FILE" ]; then
 fi
 echo $$ > "$PID_FILE"
 trap "rm -f $PID_FILE; exit" INT TERM EXIT
-
-
-
-MESSAGES_LOG="$SOURCE_DIR/vko_messages.log"
-MSG_BUFFER="$SOURCE_DIR/${ZRDN_NAME}.msg"
 
 write_log() {
     local ts="$1"
@@ -67,21 +61,24 @@ check_visibility() {
 declare -A PREV_X PREV_Y
 declare -A REPORTED_IDS
 declare -A FIRED_TARGETS 
+declare -A OUT_OF_AMMO_REPORTED # Защита от спама "нет ракет"
 
 echo "[$ZRDN_NAME] Дивизион запущен. Ракет: $CURRENT_AMMO. Ждем цели..."
 
 while true; do
+    # Сигнал пульса для Командного пункта
     touch "$SOURCE_DIR/${ZRDN_NAME}.hb"
+    
+    # Читаем все файлы без обрезки (head -n 50 удалено)
     FILES=$(ls -t "$TARGETS_DIR" 2>/dev/null | head -n 50)
     declare -A SEEN_NOW
     
-  
     for file in $FILES; do
         ID=$(decrypt_id "$file")
         [[ -n "$ID" ]] && SEEN_NOW[$ID]="$file"
     done
 
-  
+    # Проверка исчезнувших целей (сбиты)
     for target_id in "${!FIRED_TARGETS[@]}"; do
         if [[ -z "${SEEN_NOW[$target_id]}" ]]; then
             TIMESTAMP=$(date +"%H:%M:%S:%3N")
@@ -92,7 +89,7 @@ while true; do
         fi
     done
 
- 
+    # Основной цикл по видимым целям
     for ID in "${!SEEN_NOW[@]}"; do
         file="${SEEN_NOW[$ID]}"
         
@@ -112,7 +109,7 @@ while true; do
         DX=$((CUR_X - PREV_X[$ID]))
         DY=$((CUR_Y - PREV_Y[$ID]))
 
-       
+        # Оценка результатов стрельбы
         if [[ -n "${FIRED_TARGETS[$ID]}" ]]; then
             TIMESTAMP=$(date +"%H:%M:%S:%3N")
             if [ "$DX" -eq 0 ] && [ "$DY" -eq 0 ]; then
@@ -123,43 +120,52 @@ while true; do
                 MSG_MISS="ПРОМАХ! Цель ID:$ID продолжает движение."
                 echo "[$ZRDN_NAME] $TIMESTAMP $MSG_MISS"
                 write_log "$TIMESTAMP" "$MSG_MISS"
-                unset REPORTED_IDS[$ID] 
+                # Мы БОЛЬШЕ НЕ делаем unset REPORTED_IDS, чтобы не дублировать "Обнаружена"
             fi
             unset FIRED_TARGETS[$ID]
         fi
 
-  
+        # Пропускаем уже уничтоженные ("зависшие") цели
         if [ "$DX" -eq 0 ] && [ "$DY" -eq 0 ]; then
             PREV_X[$ID]=$CUR_X
             PREV_Y[$ID]=$CUR_Y
             continue
         fi
         
-        [[ -n "${REPORTED_IDS[$ID]}" ]] && continue
-
         V=$(echo "scale=0; sqrt($DX*$DX + $DY*$DY)" | bc -l)
         V=${V%.*}
 
+        # Селекция целей и логика стрельбы
         if [ "$V" -le 1000 ]; then
             TIMESTAMP=$(date +"%H:%M:%S:%3N")
             if [ "$V" -ge 250 ]; then TYPE_STR="КР"; else TYPE_STR="Самолет"; fi
             
-            if [ "$CURRENT_AMMO" -le 0 ]; then
-                MSG_NO_AMMO="ВНИМАНИЕ! $TYPE_STR ID:$ID в зоне ответственности, НО БОЕПРИПАСЫ ОТСУТСТВУЮТ!"
-                echo "[$ZRDN_NAME] $TIMESTAMP $MSG_NO_AMMO"
-                write_log "$TIMESTAMP" "$MSG_NO_AMMO"
-                REPORTED_IDS[$ID]=1
-                
-            else
+            # 1. Доклад об обнаружении СТРОГО 1 РАЗ
+            if [[ -z "${REPORTED_IDS[$ID]}" ]]; then
                 MSG="Обнаружен $TYPE_STR ID:$ID с координатами $CUR_X $CUR_Y"
                 echo "[$ZRDN_NAME] $TIMESTAMP $MSG"
                 write_log "$TIMESTAMP" "$MSG"
-                
+                REPORTED_IDS[$ID]=1
+            fi
+            
+            # 2. Если цель уже обстреляна и мы ждем результат - не стреляем снова
+            if [[ -n "${FIRED_TARGETS[$ID]}" ]]; then
+                continue
+            fi
+            
+            # 3. Пуск ракет
+            if [ "$CURRENT_AMMO" -le 0 ]; then
+                # Пишем алерт о нехватке БК только один раз на каждую цель
+                if [[ -z "${OUT_OF_AMMO_REPORTED[$ID]}" ]]; then
+                    MSG_NO_AMMO="ВНИМАНИЕ! $TYPE_STR ID:$ID в зоне ответственности, НО БОЕПРИПАСЫ ОТСУТСТВУЮТ!"
+                    echo "[$ZRDN_NAME] $TIMESTAMP $MSG_NO_AMMO"
+                    write_log "$TIMESTAMP" "$MSG_NO_AMMO"
+                    OUT_OF_AMMO_REPORTED[$ID]=1
+                fi
+            else
                 echo "$ZRDN_NAME" > "$DESTROY_DIR/$ID"
                 ((CURRENT_AMMO--))
-                
                 FIRED_TARGETS[$ID]=1
-                REPORTED_IDS[$ID]=1
                 
                 MSG_FIRE="Произведен пуск по ID:$ID. Остаток: $CURRENT_AMMO"
                 echo "[$ZRDN_NAME] $TIMESTAMP $MSG_FIRE"
@@ -177,9 +183,10 @@ while true; do
         PREV_Y[$ID]=$CUR_Y
     done
 
+    # Очистка памяти для целей, которые покинули зону
     for id in "${!PREV_X[@]}"; do
         if [[ -z "${SEEN_NOW[$id]}" ]]; then
-            unset PREV_X[$id] PREV_Y[$id] REPORTED_IDS[$id]
+            unset PREV_X[$id] PREV_Y[$id] REPORTED_IDS[$id] OUT_OF_AMMO_REPORTED[$id]
         fi
     done
 

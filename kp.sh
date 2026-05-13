@@ -36,6 +36,17 @@ while true; do
         
         if [ -f "$hb_file" ]; then
             printf "%-10s | \e[32mАКТИВЕН\e[0m\n" "$name"
+            
+            # Если система была "мертвой", логируем её триумфальное возвращение
+            if [[ "${declared_dead[$name]}" -eq 1 ]]; then
+                ts=$(date +%H:%M:%S:%3N)
+                dt=$(date +%d.%m)
+                recv_msg="$dt $ts $name ИНФО: Система успешно восстановлена и вернулась в строй!"
+                
+                echo "$recv_msg" >> "$GLOBAL_DEC_LOG"
+                new_data_received=1 # Триггер для обновления БД
+            fi
+
             # Сбрасываем флаги при успешном отклике (система жива)
             declared_dead[$name]=0
             missed_beats[$name]=0
@@ -44,7 +55,7 @@ while true; do
             # Файла пульса нет. Увеличиваем счетчик пропусков
             missed_beats[$name]=$((missed_beats[$name] + 1))
             
-            # Ждем 3 цикла (около 6 секунд) перед тем, как бить тревогу
+            # Ждем 3 цикла (около 6-9 секунд) перед тем, как бить тревогу
             if [ "${missed_beats[$name]}" -ge 3 ]; then
                 printf "%-10s | \e[31mНЕ АКТИВЕН\e[0m\n" "$name"
                 
@@ -92,8 +103,8 @@ while true; do
 
     # --- 3. СИНХРОНИЗАЦИЯ И СТАТИСТИКА (SQLite) ---
     if [ "$new_data_received" -eq 1 ]; then
-        # Строгая сортировка по времени для восстановления хронологии
-        sort -k1,1 -k2,2 "$GLOBAL_DEC_LOG" -o "$GLOBAL_DEC_LOG"
+       
+        sort -s -k1,1 -k2,2 "$GLOBAL_DEC_LOG" -o "$GLOBAL_DEC_LOG"
         
         # Пересобираем БД для актуальной аналитики
         sqlite3 "$DB_FILE" "DROP TABLE IF EXISTS logs; CREATE TABLE logs (date TEXT, time TEXT, system TEXT, message TEXT);"
@@ -126,15 +137,14 @@ while true; do
         echo "[3] Нехватка боекомплекта:"
         sqlite3 -header -column "$DB_FILE" "SELECT system AS 'Система', COUNT(*) AS 'Отказов' FROM logs WHERE message LIKE '%ОТСУТСТВУЮТ%' OR message LIKE '%ИСЧЕРПАН%' GROUP BY system;"
         echo ""
-        echo "[4] Журнал критических сбоев:"
-        sqlite3 -header -column "$DB_FILE" "SELECT time AS 'Время', system AS 'Объект', 'СБОЙ' AS 'Статус' FROM logs WHERE message LIKE '%вышла из строя%' ORDER BY time DESC LIMIT 5;"
+        echo "[4] Журнал состояний модулей:"
+        sqlite3 -header -column "$DB_FILE" "SELECT time AS 'Время', system AS 'Объект', CASE WHEN message LIKE '%вышла из строя%' THEN 'СБОЙ' ELSE 'ОК (Восстановлен)' END AS 'Статус' FROM logs WHERE message LIKE '%вышла из строя%' OR message LIKE '%вернулась в строй%' ORDER BY time DESC LIMIT 5;"
     else
         echo "Данные для анализа еще не поступили."
     fi
 
     echo "========================================================"
-    echo "Обновление: 2 сек.  Журнал: vko_decrypted_all.log"
-    echo "Для выхода: Ctrl+C"
+    echo "Обновление: 3 сек.  Журнал: vko_decrypted_all.log"
     
-    sleep 2
+    sleep 3
 done

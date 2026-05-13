@@ -17,8 +17,7 @@ CURRENT_AMMO=$SPRO_AMMO
 PID_FILE="$SOURCE_DIR/spro.pid"
 
 MESSAGES_LOG="$SOURCE_DIR/vko_messages.log"
-
-ENC_LOG="$SOURCE_DIR/${SPRO_NAME}_enc.log"
+MSG_BUFFER="$SOURCE_DIR/${SPRO_NAME}.msg"
 
 TARGETS_DIR="/tmp/GenTargets/Targets"
 DESTROY_DIR="/tmp/GenTargets/Destroy"
@@ -31,9 +30,6 @@ if [ -f "$PID_FILE" ]; then
 fi
 echo $$ > "$PID_FILE"
 trap "rm -f $PID_FILE; exit" INT TERM EXIT
-
-MESSAGES_LOG="$SOURCE_DIR/vko_messages.log"
-MSG_BUFFER="$SOURCE_DIR/${SPRO_NAME}.msg"
 
 write_log() {
     local ts="$1"
@@ -64,21 +60,23 @@ check_visibility() {
 declare -A PREV_X PREV_Y
 declare -A REPORTED_IDS
 declare -A FIRED_TARGETS 
+declare -A OUT_OF_AMMO_REPORTED # Новый массив для защиты от спама "нет ракет"
 
 echo "[$SPRO_NAME] Система ПРО запущена. Противоракет: $CURRENT_AMMO. Ждем БР..."
 
 while true; do
     touch "$SOURCE_DIR/${SPRO_NAME}.hb"
+    
+    
     FILES=$(ls -t "$TARGETS_DIR" 2>/dev/null | head -n 50)
     declare -A SEEN_NOW
     
-  
     for file in $FILES; do
         ID=$(decrypt_id "$file")
         [[ -n "$ID" ]] && SEEN_NOW[$ID]="$file"
     done
 
-    
+    # Проверка исчезнувших целей (сбиты)
     for target_id in "${!FIRED_TARGETS[@]}"; do
         if [[ -z "${SEEN_NOW[$target_id]}" ]]; then
             TIMESTAMP=$(date +"%H:%M:%S:%3N")
@@ -89,7 +87,7 @@ while true; do
         fi
     done
 
-    
+    # Основной цикл по видимым целям
     for ID in "${!SEEN_NOW[@]}"; do
         file="${SEEN_NOW[$ID]}"
         
@@ -109,7 +107,7 @@ while true; do
         DX=$((CUR_X - PREV_X[$ID]))
         DY=$((CUR_Y - PREV_Y[$ID]))
 
-        
+        # Оценка результатов стрельбы
         if [[ -n "${FIRED_TARGETS[$ID]}" ]]; then
             TIMESTAMP=$(date +"%H:%M:%S:%3N")
             if [ "$DX" -eq 0 ] && [ "$DY" -eq 0 ]; then
@@ -120,46 +118,52 @@ while true; do
                 MSG_MISS="ПРОМАХ! БР ID:$ID продолжает движение."
                 echo "[$SPRO_NAME] $TIMESTAMP $MSG_MISS"
                 write_log "$TIMESTAMP" "$MSG_MISS"
-                unset REPORTED_IDS[$ID] 
+                # Мы больше НЕ удаляем REPORTED_IDS, чтобы не кричать "Обнаружена" снова
             fi
             unset FIRED_TARGETS[$ID]
         fi
 
-       
+        # Пропускаем уже уничтоженные ("зависшие") цели
         if [ "$DX" -eq 0 ] && [ "$DY" -eq 0 ]; then
             PREV_X[$ID]=$CUR_X
             PREV_Y[$ID]=$CUR_Y
             continue
         fi
         
-        [[ -n "${REPORTED_IDS[$ID]}" ]] && continue
-
         V=$(echo "scale=0; sqrt($DX*$DX + $DY*$DY)" | bc -l)
         V=${V%.*}
 
-        
+        # Селекция БР и логика стрельбы
         if [ "$V" -ge 8000 ]; then
             TIMESTAMP=$(date +"%H:%M:%S:%3N")
             TYPE_STR="БР"
             
-           
-            if [ "$CURRENT_AMMO" -le 0 ]; then
-                MSG_NO_AMMO="ВНИМАНИЕ! $TYPE_STR ID:$ID в зоне ответственности, НО ПРОТИВОРАКЕТЫ ОТСУТСТВУЮТ!"
-                echo "[$SPRO_NAME] $TIMESTAMP $MSG_NO_AMMO"
-                write_log "$TIMESTAMP" "$MSG_NO_AMMO"
-                REPORTED_IDS[$ID]=1
-                
-            
-            else
+            # 1. Доклад об обнаружении СТРОГО 1 РАЗ
+            if [[ -z "${REPORTED_IDS[$ID]}" ]]; then
                 MSG="Обнаружена $TYPE_STR ID:$ID с координатами $CUR_X $CUR_Y"
                 echo "[$SPRO_NAME] $TIMESTAMP $MSG"
                 write_log "$TIMESTAMP" "$MSG"
-                
+                REPORTED_IDS[$ID]=1
+            fi
+            
+            # 2. Если цель уже обстреляна и мы ждем результат (снаряд летит) - не стреляем снова
+            if [[ -n "${FIRED_TARGETS[$ID]}" ]]; then
+                continue
+            fi
+            
+            # 3. Пуск ракет
+            if [ "$CURRENT_AMMO" -le 0 ]; then
+                # Спамим об отсутствии ракет тоже только 1 раз на каждую цель
+                if [[ -z "${OUT_OF_AMMO_REPORTED[$ID]}" ]]; then
+                    MSG_NO_AMMO="ВНИМАНИЕ! $TYPE_STR ID:$ID в зоне ответственности, НО ПРОТИВОРАКЕТЫ ОТСУТСТВУЮТ!"
+                    echo "[$SPRO_NAME] $TIMESTAMP $MSG_NO_AMMO"
+                    write_log "$TIMESTAMP" "$MSG_NO_AMMO"
+                    OUT_OF_AMMO_REPORTED[$ID]=1
+                fi
+            else
                 echo "$SPRO_NAME" > "$DESTROY_DIR/$ID"
                 ((CURRENT_AMMO--))
-                
                 FIRED_TARGETS[$ID]=1
-                REPORTED_IDS[$ID]=1
                 
                 MSG_FIRE="Произведен пуск противоракеты по ID:$ID. Остаток: $CURRENT_AMMO"
                 echo "[$SPRO_NAME] $TIMESTAMP $MSG_FIRE"
@@ -177,10 +181,10 @@ while true; do
         PREV_Y[$ID]=$CUR_Y
     done
 
-    
+    # Очистка памяти для целей, которые покинули зону (или удалены)
     for id in "${!PREV_X[@]}"; do
         if [[ -z "${SEEN_NOW[$id]}" ]]; then
-            unset PREV_X[$id] PREV_Y[$id] REPORTED_IDS[$id]
+            unset PREV_X[$id] PREV_Y[$id] REPORTED_IDS[$id] OUT_OF_AMMO_REPORTED[$id]
         fi
     done
 
